@@ -1,6 +1,6 @@
 # fake-wmic
 
-This repo builds a fake wmic.exe to cheat [@dropb/diskinfo](https://github.com/kukhariev/diskinfo) in wine environment. It only implements a extremely naive parser, and only accepts "logicaldisk" as its command.
+This repo builds a fake wmic.exe to cheat [@dropb/diskinfo](https://github.com/kukhariev/diskinfo) in wine environment. It only implements an extremely naive parser and only accepts "logicaldisk" as its command.
 
 ## Why?
 
