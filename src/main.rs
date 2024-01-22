@@ -9,15 +9,24 @@ enum ExecuteStateEnum {
     Command,
     SubStart,
     FilterInside,
-    ActionInside
+    ActionInside,
 }
 
-fn execute(command: Vec<String>) {
-    if command.len() == 0 {
+fn execute(command: Vec<String>, output: &mut impl Write) {
+    macro_rules! output {
+        ($($arg:tt)*) => {
+            output.write_all(format!($($arg)*).as_bytes()).unwrap();
+        }
+    }
+    macro_rules! outputln {
+        ($($arg:tt)*) => {
+            output.write_all(format!($($arg)*).as_bytes()).unwrap();
+            output.write_all(b"\n").unwrap();
+        }
+    }
+    if command.is_empty() {
         return;
     }
-
-    // println!("{:?}", command);
 
     let disk_re = Regex::new(r#"name\s*=\s*['"]([a-zA-Z]:)['"]"#).unwrap();
 
@@ -52,12 +61,10 @@ fn execute(command: Vec<String>) {
                 state = match item.as_str() {
                     "where" => ExecuteStateEnum::FilterInside,
                     "get" => ExecuteStateEnum::ActionInside,
-                    "set" => {
-                        return
-                    },
+                    "set" => return,
                     _ => {
                         eprintln!("Unsupported action");
-                        return
+                        return;
                     }
                 };
             }
@@ -73,7 +80,11 @@ fn execute(command: Vec<String>) {
                 state = ExecuteStateEnum::SubStart
             }
             ExecuteStateEnum::ActionInside => {
-                let attr_vec: Vec<String> = item.split(",").map(|x| x.trim().to_string()).filter(|x| x.len() > 0).collect();
+                let attr_vec: Vec<String> = item
+                    .split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect();
                 get_attr_vector.extend(attr_vec);
             }
         }
@@ -81,22 +92,24 @@ fn execute(command: Vec<String>) {
 
     get_attr_vector.sort();
 
-    println!("{}", get_attr_vector.join("\t"));
+    outputln!("{}", get_attr_vector.join("\t"));
 
     for drive in drive_list {
-        for attr in get_attr_vector.iter() {
-            let output = match attr.as_str() {
-                "drivetype" => "3",  // "normal disk"
-                "freespace" => "1000000000000",  // 1 TB
-                "size" => "1000000000000",  // 1 TB
+        for (idx, attr) in get_attr_vector.iter().enumerate() {
+            let outstr = match attr.as_str() {
+                "drivetype" => "3",             // "normal disk"
+                "freespace" => "1000000000000", // 1 TB
+                "size" => "1000000000000",      // 1 TB
                 "name" => drive.as_str(),
-                _ => unimplemented!("unknown attr")
+                _ => unimplemented!("unknown attr"),
             };
-            print!("{}\t", output);
+            if idx != get_attr_vector.len() - 1 {
+                output!("{}\t", outstr);
+            } else {
+                output!("{}\n", outstr);
+            }
         }
-        println!("");
     }
-
 }
 
 fn repl() {
@@ -112,7 +125,7 @@ fn repl() {
         };
         let command = shlex::split(&line);
         match command {
-            Some(command) => execute(command),
+            Some(command) => execute(command, &mut io::stdout()),
             None => eprintln!("Unknown input"),
         }
     }
@@ -129,7 +142,39 @@ fn main() {
             // Here we don't handle "global switch" (like /?, /namespace, etc) of wmic
             // too lazy to do that
             let wmic_command = &args[1..];
-            execute(wmic_command.to_vec())
+            execute(wmic_command.to_vec(), &mut io::stdout());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_payload(command: &str, expected: &str) {
+        let command = shlex::split(command).unwrap();
+        let mut output = Vec::new();
+        execute(command, &mut output);
+        let output = String::from_utf8(output).unwrap();
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn test_payload1() {
+        let command = r#"logicaldisk where "not size=null and name = 'c:'" get name, drivetype, size, freespace"#;
+        let expected = r#"drivetype	freespace	name	size
+3	1000000000000	C:	1000000000000
+"#;
+        test_payload(command, expected);
+    }
+
+    #[test]
+    fn test_payload2() {
+        let command = r#"logicaldisk where "not size=null" get name, drivetype, size, freespace"#;
+        let expected = r#"drivetype	freespace	name	size
+3	1000000000000	C:	1000000000000
+3	1000000000000	Z:	1000000000000
+"#;
+        test_payload(command, expected);
     }
 }
